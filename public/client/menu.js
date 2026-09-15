@@ -1,4 +1,7 @@
-// Lightweight battle-only controls that do not touch authoritative game state.
+// Lightweight battle controls plus presentation tuning.
+import { ClientGame } from './game.js';
+import { Renderer } from './render.js';
+
 const menu = document.getElementById('battleMenu');
 const open = document.getElementById('btnBattleMenu');
 const resume = document.getElementById('btnMenuResume');
@@ -29,13 +32,32 @@ fullscreen?.addEventListener('click', async () => {
   try {
     if (document.fullscreenElement) await document.exitFullscreen();
     else await document.documentElement.requestFullscreen();
-  } catch {
-    // Fullscreen is optional on browsers that do not expose the API.
-  }
+  } catch { /* browser does not allow fullscreen */ }
 });
 
 document.addEventListener('fullscreenchange', () => {
   if (!fullscreen) return;
-  fullscreen.textContent = document.fullscreenElement ? '⛶' : '⛶';
   fullscreen.title = document.fullscreenElement ? 'Exit fullscreen' : 'Fullscreen';
 });
+
+// The arena is bounded by permanent map walls now; remove the legacy circle
+// overlay and its minimap layer without changing authoritative simulation.
+Renderer.prototype.drawZone = function drawZoneDisabled() {};
+const drawMinimap = Renderer.prototype.drawMinimap;
+Renderer.prototype.drawMinimap = function drawMinimapWithoutZone(view) {
+  return drawMinimap.call(this, { ...view, zone: null });
+};
+
+// On touch devices keep the player's tank prominent, while retaining a wider
+// tactical view on desktop. This adapts automatically as the viewport changes.
+const updateCameraScale = ClientGame.prototype.updateCameraScale;
+ClientGame.prototype.updateCameraScale = function updateCameraScaleMobile() {
+  updateCameraScale.call(this);
+  const coarse = matchMedia('(pointer: coarse)').matches;
+  if (!coarse) return;
+  const w = this.renderer.width || window.innerWidth;
+  const h = this.renderer.height || window.innerHeight;
+  const portrait = h > w;
+  const boost = portrait ? 1.18 : 1.28;
+  this.cam.scale = Math.min(1.75, this.cam.scale * boost);
+};
