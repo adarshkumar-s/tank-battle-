@@ -89,6 +89,9 @@ export class Input {
         el.setPointerCapture?.(e.pointerId);
         el.classList.add('active');
         set(true);
+        if (e.pointerType !== 'mouse') {
+          haptic(el === this.btnFire ? 8 : 12);
+        }
         if (el === this.btnFire) this.onFireTap?.();
       }, { passive: false });
       const up = (e) => {
@@ -218,6 +221,11 @@ export class Input {
 
   wantsFire() { return this.fire; }
   wantsBoost() { return this.boost; }
+}
+
+function haptic(pattern) {
+  if (!('vibrate' in navigator)) return;
+  try { navigator.vibrate(pattern); } catch { /* unsupported/blocked */ }
 }
 
 function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
