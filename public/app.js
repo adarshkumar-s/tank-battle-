@@ -21,6 +21,7 @@ let lastRoom = null;
 let lastEndEvent = null;
 let resultsTimer = null;
 let roomsTimer = null;
+let pendingRoomAction = false;
 
 /* ------------------------------------------------------------------ *
  * Boot
@@ -41,9 +42,12 @@ const input = new Input({
 net = new Net({
   onOpen() {
     hud.setReconnecting(false);
-    if (net.session && net.session.code && !me) {
+    // Never let an old reconnect session race a brand-new Create/Join action.
+    // This was especially easy to hit after refreshing or leaving a room.
+    if (!pendingRoomAction && net.session && net.session.code && !me) {
       net.send({ t: 'rejoin', code: net.session.code, playerId: net.session.playerId, token: net.session.token, name: hud.$.nameInput.value.trim() || net.session.name }, false);
     }
+    if (pendingRoomAction) flushPendingRoomAction();
   },
   onClose() {
     hud.setReconnecting(true);
@@ -90,6 +94,7 @@ game.start();
 function handleMessage(msg) {
   switch (msg.t) {
     case 'joined': {
+      pendingRoomAction = false;
       me = { id: msg.playerId, name: msg.name, color: msg.color };
       net.saveSession({
         code: msg.code, playerId: msg.playerId, token: msg.token, name: msg.name, at: Date.now(),
@@ -122,8 +127,6 @@ function handleMessage(msg) {
         if (msg.room.results && hud.screen === 'results') {
           hud.renderResults(msg.room, me, lastEndEvent?.durationMs);
         } else if (msg.room.results && hud.screen === 'battle') {
-          // Reconnected (or missed the end event) after the match ended — still
-          // bring the player to the scoreboard instead of leaving them stuck.
           watchForResults();
         }
       }
@@ -167,6 +170,7 @@ function handleMessage(msg) {
 
 function handleError(msg) {
   const text = msg.message || 'Something went wrong.';
+  pendingRoomAction = false;
   hud.toast(text, 'warn');
   hud.activity(`⚠️ ${text}`);
   if (msg.code === 'NOT_FOUND' || msg.code === 'CLOSED' || msg.code === 'KICKED' || msg.code === 'STARTED') {
@@ -192,11 +196,24 @@ function createRoom(name) {
     hud.$.nameInput.focus();
     return;
   }
-  if (!net.connected) {
-    hud.toast('Connecting to the battlefield…', 'warn');
-    net.open();
-  }
-  net.send({ t: 'create', name: clean });
+
+  // Creating a room must always be a fresh session. A stale saved seat must
+  // not trigger an automatic rejoin on the same socket/open cycle.
+  net.clearSession();
+  me = null;
+  lastRoom = null;
+  pendingRoomAction = true;
+  hud.toast('Creating battlefield…');
+  if (net.connected) flushPendingRoomAction(clean);
+  else net.open();
+}
+
+function flushPendingRoomAction(name) {
+  if (!pendingRoomAction || !net.connected) return;
+  const clean = name || hud.$.nameInput.value.trim();
+  if (!clean) return;
+  pendingRoomAction = false;
+  net.send({ t: 'create', name: clean }, false);
 }
 
 function joinRoom(code) {
@@ -213,12 +230,22 @@ function joinRoom(code) {
     return;
   }
   net.clearSession();
-  net.send({ t: 'join', code: cleanCode, name });
+  me = null;
+  lastRoom = null;
+  pendingRoomAction = true;
+  if (net.connected) flushPendingJoin(cleanCode, name);
+  else net.open();
+}
+
+function flushPendingJoin(code, name) {
+  if (!pendingRoomAction || !net.connected) return;
+  pendingRoomAction = false;
+  net.send({ t: 'join', code, name }, false);
 }
 
 function leaveRoom() {
-  const code = net.session?.code;
   net.clearSession();
+  pendingRoomAction = false;
   me = null;
   lastRoom = null;
   if (net.ws && net.ws.readyState === 1) net.ws.close(1000, 'left');
@@ -321,7 +348,6 @@ function watchForResults() {
     if (lastRoom && lastRoom.results && lastRoom.results.length) {
       hud.renderResults(lastRoom, me, lastEndEvent?.durationMs);
     } else {
-      // Results not here yet (slow socket) — try again shortly.
       watchForResults();
     }
   }, 2400);
@@ -390,7 +416,6 @@ hud.$.nameInput.addEventListener('change', () => {
  * ------------------------------------------------------------------ */
 function boot() {
   renderer.resize();
-  // Deep link: /r/CODE prefills the room code.
   const m = location.pathname.match(/\/r\/([A-Za-z0-9]{4,8})/);
   if (m) hud.setCode(m[1].toUpperCase().slice(0, 6));
   const sessionName = net.session?.name;
@@ -401,10 +426,9 @@ function boot() {
   net.open();
   fetchRooms();
   startRoomsWatch(true);
-  // Resume the room we were in after a refresh (rejoin is sent on open).
   if (net.session?.code) {
     setTimeout(() => {
-      if (!me && net.connected) {
+      if (!pendingRoomAction && !me && net.connected && net.session?.code) {
         net.send({ t: 'rejoin', code: net.session.code, playerId: net.session.playerId, token: net.session.token, name: hud.$.nameInput.value.trim() || net.session.name });
       }
     }, 300);
