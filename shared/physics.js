@@ -30,6 +30,7 @@ export class CollisionWorld {
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
       const b = this.buckets[r * this.cols + c]; if (!b) continue;
       for (const o of b) {
+        if (o.kind === 'water') continue; // decorative water must not behave like an invisible wall
         if (o._stamp === stamp) continue; o._stamp = stamp; if (o.destroyed) continue;
         const bb = obstacleBounds(o); if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) continue; out.push(o);
       }
