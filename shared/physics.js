@@ -30,7 +30,9 @@ export class CollisionWorld {
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
       const b = this.buckets[r * this.cols + c]; if (!b) continue;
       for (const o of b) {
-        if (o.kind === 'water') continue; // decorative water must not behave like an invisible wall
+        // Water and small cover are visual/gameplay dressing, not movement walls.
+        // Only major structures and rocks participate in physical blocking.
+        if (o.kind === 'water' || ['barrel', 'tree', 'woodCrate', 'metalCrate', 'barrier', 'sandbag', 'metal'].includes(o.material)) continue;
         if (o._stamp === stamp) continue; o._stamp = stamp; if (o.destroyed) continue;
         const bb = obstacleBounds(o); if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) continue; out.push(o);
       }
@@ -52,7 +54,7 @@ function resolveCircleObstacle(px, py, radius, o) {
   if (m === left) return { x: o.x - radius, y: py }; if (m === right) return { x: o.x + o.w + radius, y: py }; if (m === top) return { x: px, y: o.y - radius }; return { x: px, y: o.y + o.h + radius };
 }
 export function resolveCircle(world, pos, radius, filter) {
-  for (let pass = 0; pass < 3; pass++) {
+  for (let pass = 0; pass < 2; pass++) {
     const near = world.query(pos.x - radius, pos.y - radius, pos.x + radius, pos.y + radius).slice(); let moved = false;
     for (const o of near) { if (filter && !filter(o)) continue; const res = resolveCircleObstacle(pos.x, pos.y, radius, o); if (res) { pos.x = res.x; pos.y = res.y; moved = true; } }
     if (!moved) break;
@@ -80,17 +82,51 @@ export function raycastObstacles(world, x0, y0, x1, y1, radius) {
 
 export function createTankState(x, y, angle = 0) { return { x, y, vx: 0, vy: 0, angle, turret: angle }; }
 export function stepTank(state, input, dt, world, speedMult = 1) {
-  let mx = input.mx || 0, my = input.my || 0; const mag = Math.hypot(mx, my); if (mag > 1) { mx /= mag; my /= mag; }
-  const maxSpeed = TANK.speed * speedMult, targetVx = mx * maxSpeed, targetVy = my * maxSpeed, k = 1 - Math.exp(-TANK.accel * dt);
-  state.vx += (targetVx - state.vx) * k; state.vy += (targetVy - state.vy) * k;
-  if (Math.abs(mx) < 0.001 && Math.abs(my) < 0.001) { const brake = Math.exp(-20 * dt); state.vx *= brake; state.vy *= brake; if (Math.abs(state.vx) < 0.8) state.vx = 0; if (Math.abs(state.vy) < 0.8) state.vy = 0; }
-  state.x += state.vx * dt; resolveCircle(world, state, TANK.radius); state.y += state.vy * dt; resolveCircle(world, state, TANK.radius);
-  const speed = Math.hypot(state.vx, state.vy); if (speed > 8) state.angle = turnToward(state.angle, Math.atan2(state.vy, state.vx), TANK.hullTurn * dt);
+  let mx = input.mx || 0, my = input.my || 0;
+  const mag = Math.hypot(mx, my);
+  if (mag > 1) { mx /= mag; my /= mag; }
+
+  const maxSpeed = TANK.speed * speedMult;
+  const targetVx = mx * maxSpeed;
+  const targetVy = my * maxSpeed;
+  // Responsive easing: fast enough for combat, but without the jerky instant
+  // velocity changes that made prediction/correction feel like rubber-banding.
+  const k = 1 - Math.exp(-18 * dt);
+  state.vx += (targetVx - state.vx) * k;
+  state.vy += (targetVy - state.vy) * k;
+
+  if (Math.abs(mx) < 0.001 && Math.abs(my) < 0.001) {
+    const brake = Math.exp(-13 * dt);
+    state.vx *= brake;
+    state.vy *= brake;
+    if (Math.abs(state.vx) < 1.2) state.vx = 0;
+    if (Math.abs(state.vy) < 1.2) state.vy = 0;
+  }
+
+  // Resolve the complete movement together so diagonal motion slides cleanly
+  // around corners instead of getting caught by X/Y axis corrections.
+  state.x += state.vx * dt;
+  state.y += state.vy * dt;
+  resolveCircle(world, state, TANK.radius);
+
+  const speed = Math.hypot(state.vx, state.vy);
+  if (speed > 8) state.angle = turnToward(state.angle, Math.atan2(state.vy, state.vx), TANK.hullTurn * dt);
   if (typeof input.turret === 'number' && Number.isFinite(input.turret)) state.turret = turnToward(state.turret, input.turret, TANK.turretTurn * dt);
   return state;
 }
 export function sanitizeInput(raw) {
-  const out = { mx: 0, my: 0, turret: 0, fire: false, boost: false }; if (!raw || typeof raw !== 'object') return out;
-  let mx = Number(raw.mx), my = Number(raw.my); if (!Number.isFinite(mx)) mx = 0; if (!Number.isFinite(my)) my = 0; const mag = Math.hypot(mx, my); if (mag > 1) { mx /= mag; my /= mag; }
-  out.mx = clamp(mx, -1, 1); out.my = clamp(my, -1, 1); const t = Number(raw.turret); out.turret = Number.isFinite(t) ? t : 0; out.fire = raw.fire === true; out.boost = raw.boost === true; return out;
+  const out = { mx: 0, my: 0, turret: 0, fire: false, boost: false };
+  if (!raw || typeof raw !== 'object') return out;
+  let mx = Number(raw.mx), my = Number(raw.my);
+  if (!Number.isFinite(mx)) mx = 0;
+  if (!Number.isFinite(my)) my = 0;
+  const mag = Math.hypot(mx, my);
+  if (mag > 1) { mx /= mag; my /= mag; }
+  out.mx = clamp(mx, -1, 1);
+  out.my = clamp(my, -1, 1);
+  const t = Number(raw.turret);
+  out.turret = Number.isFinite(t) ? t : 0;
+  out.fire = raw.fire === true;
+  out.boost = raw.boost === true;
+  return out;
 }
