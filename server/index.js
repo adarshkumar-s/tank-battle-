@@ -23,17 +23,22 @@ const SHARED_DIR = path.join(ROOT, 'shared');
 const PORT = Number(process.env.PORT || 3000);
 const HOST = process.env.HOST || '0.0.0.0';
 
-// Test hook: compress the zone schedule so the shrinking-zone behaviour can be
-// exercised without waiting minutes. Never set in production.
+// Test hooks (never set in production):
+//  - TANKFALL_ZONE_SCALE compresses the battle-zone *schedule* so shrinking can
+//    be exercised without waiting minutes.
+//  - TANKFALL_ZONE_OFF disables zone damage entirely, so feature tests (cover,
+//    powerups, bots) run in a stable world. The zone still renders/shrinks.
 const ZONE_SCALE = Number(process.env.TANKFALL_ZONE_SCALE || 0);
 if (ZONE_SCALE > 0) {
   for (const phase of ZONE.phases) {
     phase.waitMs = Math.max(1200, Math.round(phase.waitMs * ZONE_SCALE));
     phase.shrinkMs = Math.max(1200, Math.round(phase.shrinkMs * ZONE_SCALE));
-    phase.radius = Math.max(140, Math.round(phase.radius * 0.55));
   }
-  ZONE.startRadius = Math.max(620, Math.round(ZONE.startRadius * 0.55));
   console.log(`[tankfall] zone test scale x${ZONE_SCALE} enabled`);
+}
+if (process.env.TANKFALL_ZONE_OFF === '1') {
+  for (const phase of ZONE.phases) phase.dps = 0;
+  console.log('[tankfall] battle-zone damage disabled (test mode)');
 }
 
 const rooms = new RoomManager();

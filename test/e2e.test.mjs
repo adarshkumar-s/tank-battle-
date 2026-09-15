@@ -99,7 +99,7 @@ async function main() {
     await runOn('match', { TANKFALL_ZONE_SCALE: '0.3' }, PORT + 3, scenarioFullMatch);
   }
   if (want('destruction')) {
-    await runOn('destruction', { TANKFALL_ZONE_SCALE: '50' }, PORT + 2, scenarioDestructionAndPowerups);
+    await runOn('destruction', { TANKFALL_ZONE_OFF: '1' }, PORT + 2, scenarioDestructionAndPowerups);
   }
   if (want('zone')) {
     await runOn('zone', { TANKFALL_ZONE_SCALE: '0.05' }, PORT + 1, scenarioShrinkingZone);
