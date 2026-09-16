@@ -4,6 +4,8 @@
 
 import { TANK, WORLD, clamp, turnToward } from './constants.js';
 
+const LIGHT_COVER = new Set(['barrel', 'tree', 'woodCrate', 'metalCrate', 'barrier', 'sandbag', 'metal']);
+
 export class CollisionWorld {
   constructor(map) {
     this.w = map.w || WORLD.w;
@@ -23,16 +25,25 @@ export class CollisionWorld {
     const r0 = clamp(Math.floor(bb.y0 / this.cell), 0, this.rows - 1), r1 = clamp(Math.floor(bb.y1 / this.cell), 0, this.rows - 1);
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) (this.buckets[r * this.cols + c] || (this.buckets[r * this.cols + c] = [])).push(o);
   }
-  query(x0, y0, x1, y1) {
+  /* Movement set: water and small cover are dressing tanks drive over, so only
+   * major structures and rocks block movement. */
+  query(x0, y0, x1, y1) { return this._collect(x0, y0, x1, y1, false); }
+
+  /* Full set: everything except water. Shots and line-of-sight must respect
+   * the light cover too — crates, barrels, trees and sandbags are exactly the
+   * things players shoot at, and the movement filter used to make them
+   * invisible to bullets. */
+  queryAll(x0, y0, x1, y1) { return this._collect(x0, y0, x1, y1, true); }
+
+  _collect(x0, y0, x1, y1, includeLight) {
     const out = this._scratch; out.length = 0; const stamp = ++this._stamp;
     const c0 = clamp(Math.floor(Math.min(x0, x1) / this.cell), 0, this.cols - 1), c1 = clamp(Math.floor(Math.max(x0, x1) / this.cell), 0, this.cols - 1);
     const r0 = clamp(Math.floor(Math.min(y0, y1) / this.cell), 0, this.rows - 1), r1 = clamp(Math.floor(Math.max(y0, y1) / this.cell), 0, this.rows - 1);
     for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
       const b = this.buckets[r * this.cols + c]; if (!b) continue;
       for (const o of b) {
-        // Water and small cover are visual/gameplay dressing, not movement walls.
-        // Only major structures and rocks participate in physical blocking.
-        if (o.kind === 'water' || ['barrel', 'tree', 'woodCrate', 'metalCrate', 'barrier', 'sandbag', 'metal'].includes(o.material)) continue;
+        if (o.kind === 'water') continue;
+        if (!includeLight && LIGHT_COVER.has(o.material)) continue;
         if (o._stamp === stamp) continue; o._stamp = stamp; if (o.destroyed) continue;
         const bb = obstacleBounds(o); if (bb.x1 < x0 || bb.x0 > x1 || bb.y1 < y0 || bb.y0 > y1) continue; out.push(o);
       }
@@ -75,7 +86,7 @@ function rayCircleT(x0, y0, x1, y1, cx, cy, r) {
   const sq = Math.sqrt(disc), t1 = (-b - sq) / (2 * a), t2 = (-b + sq) / (2 * a); if (t1 >= 0 && t1 <= 1) return t1; if (t2 >= 0 && t2 <= 1) return t2; return null;
 }
 export function raycastObstacles(world, x0, y0, x1, y1, radius) {
-  const pad = radius + 1, near = world.query(Math.min(x0, x1) - pad, Math.min(y0, y1) - pad, Math.max(x0, x1) + pad, Math.max(y0, y1) + pad).slice(); let best = null;
+  const pad = radius + 1, near = world.queryAll(Math.min(x0, x1) - pad, Math.min(y0, y1) - pad, Math.max(x0, x1) + pad, Math.max(y0, y1) + pad).slice(); let best = null;
   for (const o of near) { const t = o.shape === 'circle' ? rayCircleT(x0, y0, x1, y1, o.x, o.y, o.r + radius) : rayRectT(x0, y0, x1, y1, o.x - radius, o.y - radius, o.x + o.w + radius, o.y + o.h + radius); if (t !== null && (!best || t < best.t)) best = { t, obstacle: o }; }
   return best ? { t: best.t, obstacle: best.obstacle, x: x0 + (x1 - x0) * best.t, y: y0 + (y1 - y0) * best.t } : null;
 }
