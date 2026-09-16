@@ -212,11 +212,16 @@ export class ClientGame {
     while (i > 0 && snaps[i].t > renderTime) i--;
     const a = snaps[i];
     const b = snaps[Math.min(i + 1, snaps.length - 1)];
+    // alpha = how far renderTime sits between snapshot a and snapshot b.
     let alpha = b.t > a.t ? (renderTime - a.t) / (b.t - a.t) : 0;
-    const extrapolating = renderTime > b.t;
     alpha = clamp(alpha, 0, 1);
-    // Extend slightly when we're ahead of the newest snapshot (packet jitter).
-    const ahead = extrapolating ? clamp((renderTime - b.t) / 120, 0, 1) : 0;
+    // When renderTime is already past the newest snapshot (packet jitter) we
+    // extend a little beyond b, capped at one snapshot interval.
+    const ahead = renderTime > b.t ? clamp((renderTime - b.t) / Math.max(1, b.t - a.t), 0, 1) : 0;
+    // Interpolate with alpha and extrapolate with ahead. (Using only `ahead`
+    // here — as this did before — snapped every remote entity to the newest
+    // snapshot, freezing them for two frames and then teleporting them.)
+    const k = alpha + ahead;
 
     const lerpList = (listA, listB) => {
       const res = [];
@@ -225,7 +230,7 @@ export class ClientGame {
         const ea = mapA.get(eb.id);
         if (!ea) { res.push({ ...eb }); continue; }
         const o = { ...eb };
-        const k = 1 + ahead;
+        const k = alpha + ahead;
         o.x = ea.x + (eb.x - ea.x) * k;
         o.y = ea.y + (eb.y - ea.y) * k;
         o.angle = ea.angle + angleDiff(ea.angle, eb.angle) * k;
