@@ -1,7 +1,7 @@
 // TANKFALL — canvas renderer. Arcade-military look: chunky silhouettes, flat
 // readable colors, big satisfying explosions. The static terrain is baked once
 // into an offscreen bitmap; obstacles are drawn culled and per-frame so
-destructible cover can disappear the instant the server says so.
+// destructible cover can disappear the instant the server says so.
 
 import { WORLD, TANK, POWERUP, POWERUP_INFO, FLAGS, clamp } from '/shared/constants.js';
 
