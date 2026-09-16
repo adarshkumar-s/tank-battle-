@@ -773,6 +773,7 @@ kbd {
 
 /* ============================ ROTATE HINT ============================ */
 .rotate-hint {
+  pointer-events: none;   /* a hint must never eat a joystick / FIRE tap */
   position: fixed;
   left: 50%;
   bottom: 8px;

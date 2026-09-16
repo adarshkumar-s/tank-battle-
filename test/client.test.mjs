@@ -208,6 +208,73 @@ async function main() {
     ok(app.hud.screen === 'battle' && app.game.phase === 'PLAYING', 'second match started for the same clients');
     ok(app.game.snaps.length > 5, 'fresh snapshots streaming in the rematch');
 
+
+    /* ---- touch controls survive real-device quirks (regression) ---- */
+    {
+      const R = (l, t, r, b) => ({ left: l, top: t, right: r, bottom: b, width: r - l, height: b - t, x: l, y: t });
+      const joyZone = dom.elements.get('joyZone');
+      const btnFire = dom.elements.get('btnFire');
+      const realJoyRect = joyZone.getBoundingClientRect;
+      const realFireRect = btnFire.getBoundingClientRect;
+      joyZone.getBoundingClientRect = () => R(0, 352, 187, 844);
+      btnFire.getBoundingClientRect = () => R(272, 700, 380, 808);
+      // A picky mobile engine: every pointer-capture call throws.
+      const realCapture = dom.ElementStub.prototype.setPointerCapture;
+      dom.ElementStub.prototype.setPointerCapture = () => { throw new Error('InvalidStateError'); };
+
+      const posOf = (id) => {
+        const snap = app.game.snaps[app.game.snaps.length - 1];
+        const t = snap && snap.tanks.find((x) => x.id === id);
+        return t ? { x: t.x, y: t.y } : null;
+      };
+
+      const beforeJoy = posOf(meId);
+      joyZone.dispatch('pointerdown', { pointerId: 71, pointerType: 'touch', clientX: 40, clientY: 760 });
+      joyZone.dispatch('pointermove', { pointerId: 71, pointerType: 'touch', clientX: 170, clientY: 760 });
+      await sleep(700);
+      ok(app.game.input.mx > 0.5, `joystick works even when setPointerCapture throws (mx=${app.game.input.mx.toFixed(2)})`);
+      const afterJoy = posOf(meId);
+      ok(beforeJoy && afterJoy && Math.hypot(afterJoy.x - beforeJoy.x, afterJoy.y - beforeJoy.y) > 4,
+        'a touch press actually drives the tank');
+      joyZone.dispatch('pointerup', { pointerId: 71, pointerType: 'touch' });
+      await sleep(120);
+      ok(app.game.input.mx === 0, 'releasing the thumb stops the tank');
+
+      const shotsBefore = host.events.filter((e) => e.k === 'shoot' && e.id === meId).length;
+      btnFire.dispatch('pointerdown', { pointerId: 72, pointerType: 'touch', clientX: 330, clientY: 750 });
+      await sleep(700);
+      ok(app.game.input.fire === true, 'FIRE arms even when setPointerCapture throws');
+      const shotsAfter = host.events.filter((e) => e.k === 'shoot' && e.id === meId).length;
+      ok(shotsAfter > shotsBefore, `shots from a touch press reach the server (${shotsAfter - shotsBefore})`);
+      btnFire.dispatch('pointerup', { pointerId: 72, pointerType: 'touch' });
+      await sleep(150);
+      ok(app.game.input.fire === false, 'FIRE releases cleanly (never stuck on)');
+
+      // Touch that never reaches the control element (CSS pointer-events quirk).
+      const beforeFallback = posOf(meId);
+      const canvasEl = dom.elements.get('game');
+      dom.window.dispatch('touchstart', { target: canvasEl, cancelable: true, changedTouches: [{ identifier: 81, clientX: 30, clientY: 780 }] });
+      dom.window.dispatch('touchmove', { target: canvasEl, cancelable: true, changedTouches: [{ identifier: 81, clientX: 160, clientY: 780 }] });
+      await sleep(700);
+      ok(app.game.input.mx > 0.5, `joystick works when the touch lands on the canvas (mx=${app.game.input.mx.toFixed(2)})`);
+      const afterFallback = posOf(meId);
+      ok(beforeFallback && afterFallback && Math.hypot(afterFallback.x - beforeFallback.x, afterFallback.y - beforeFallback.y) > 4,
+        'the fallback path drives the tank too');
+      dom.window.dispatch('touchend', { target: canvasEl, cancelable: true, changedTouches: [{ identifier: 81 }] });
+      await sleep(120);
+      ok(app.game.input.mx === 0 && app.game.input.fire === false, 'fallback release clears every control');
+
+      // Desktop must keep mouse aiming: a mouse press on FIRE is not a touch.
+      btnFire.dispatch('pointerdown', { pointerId: 73, pointerType: 'mouse', clientX: 330, clientY: 750 });
+      await sleep(60);
+      ok(app.game.input.usingTouch === false, 'a mouse press on FIRE keeps mouse aiming on desktop');
+      btnFire.dispatch('pointerup', { pointerId: 73, pointerType: 'mouse' });
+
+      dom.ElementStub.prototype.setPointerCapture = realCapture;
+      joyZone.getBoundingClientRect = realJoyRect;
+      btnFire.getBoundingClientRect = realFireRect;
+    }
+
     ok(runtimeErrors.length === 0, `no uncaught client errors during the whole session (${runtimeErrors.length})`);
     host.stop();
     bruiser.stop();

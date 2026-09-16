@@ -161,11 +161,24 @@ export function installDom({ html = null } = {}) {
     elements,
   };
 
+  // A real event target, so window-level handlers (keyboard, pointer release,
+  // touch fallbacks) are actually exercised by the harness.
+  const winListeners = new Map();
   const win = {
     devicePixelRatio: 1,
     innerWidth: 1280,
     innerHeight: 720,
-    addEventListener() {}, removeEventListener() {},
+    addEventListener(type, fn) {
+      if (!winListeners.has(type)) winListeners.set(type, []);
+      winListeners.get(type).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const l = winListeners.get(type) || [];
+      winListeners.set(type, l.filter((x) => x !== fn));
+    },
+    dispatch(type, ev = {}) {
+      for (const fn of winListeners.get(type) || []) fn({ type, target: win, preventDefault() {}, stopPropagation() {}, ...ev });
+    },
     matchMedia: () => ({ matches: false, addEventListener() {}, removeEventListener() {} }),
     requestAnimationFrame: (fn) => setTimeout(() => fn(performance.now()), 16),
     cancelAnimationFrame: (id) => clearTimeout(id),
